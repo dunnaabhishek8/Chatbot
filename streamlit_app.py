@@ -1,68 +1,108 @@
 import uuid
-
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from langgraph_rag_backend import (          # <-- make sure this matches your backend file name
+from langgraph_rag_backend import (
     chatbot,
     ingest_pdf,
     retrieve_all_threads,
     thread_document_metadata,
+    create_user,    
+    verify_user
 )
-
 
 # =========================== Utilities ===========================
 def generate_thread_id() -> str:
     return str(uuid.uuid4())
 
-
 def reset_chat():
     thread_id = generate_thread_id()
-    st.session_state["thread_id"] = thread_id
-    add_thread(thread_id)
+    full_thread_id = f"{st.session_state['user_id']}::{thread_id}"
+    st.session_state["thread_id"] = full_thread_id
+    add_thread(full_thread_id)
     st.session_state["message_history"] = []
-
 
 def add_thread(thread_id):
     if thread_id not in st.session_state["chat_threads"]:
         st.session_state["chat_threads"].append(thread_id)
 
-
 def load_conversation(thread_id):
-    state = chatbot.get_state(config={"configurable": {"thread_id": thread_id}})
+    state = chatbot.get_state(config={"configurable": {"thread_id": str(thread_id)}})
     return state.values.get("messages", [])
 
-
 def get_thread_title(thread_id):
-    """Fetches the first user message to use as the chat title."""
+    """Fetches the first 20 characters of the first user message to use as the chat title."""
     try:
         messages = load_conversation(str(thread_id))
-        
-        # Find the first HumanMessage
         for msg in messages:
             if isinstance(msg, HumanMessage):
-                # Clean text: remove newlines and extra spaces
                 text = str(msg.content).replace("\n", " ").strip()
-                if len(text) > 40:
-                    return text[:40] + "..."
+                if len(text) > 20:
+                    return text[:20] + "..."
                 elif text:
                     return text
     except Exception:
         pass
-    
-    # Fallback if the chat is empty or throws an error
-    return f"New Chat ({str(thread_id)[:8]})"
+    return "New Conversation"
 
+# ======================= Secure Login System ===================
+if "user_id" not in st.session_state:
+    st.sidebar.title("🔒 Welcome")
+    tab1, tab2 = st.sidebar.tabs(["Login", "Sign Up"])
+    
+    # --- LOGIN TAB ---
+    with tab1:
+        login_user = st.text_input("Username", key="login_user")
+        login_pass = st.text_input("Password", type="password", key="login_pass")
+        
+        if st.button("Login", use_container_width=True):
+            if verify_user(login_user, login_pass):
+                clean_name = "".join(c for c in login_user if c.isalnum() or c in ("_", "-")).lower()
+                st.session_state["user_id"] = clean_name
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password")
+                
+    # --- SIGN UP TAB ---
+    with tab2:
+        new_user = st.text_input("Choose Username", key="signup_user")
+        new_pass = st.text_input("Create Password", type="password", key="signup_pass")
+        confirm_pass = st.text_input("Confirm Password", type="password", key="signup_confirm")
+        
+        if st.button("Create Account", use_container_width=True):
+            if not new_user or not new_pass:
+                st.warning("Please fill all fields.")
+            elif new_pass != confirm_pass:
+                st.warning("Passwords do not match.")
+            elif len(new_pass) < 4:
+                st.warning("Password must be at least 4 characters.")
+            else:
+                success, msg = create_user(new_user, new_pass)
+                if success:
+                    st.success(msg + " Please log in.")
+                else:
+                    st.error(msg)
+                    
+    st.stop()
+
+# If they are logged in, show their name and a logout button
+st.sidebar.success(f"Logged in as: **{st.session_state['user_id']}**")
+if st.sidebar.button("Logout", use_container_width=True):
+    del st.session_state["user_id"]
+    st.rerun()
 
 # ======================= Session Initialization ===================
 if "message_history" not in st.session_state:
     st.session_state["message_history"] = []
 
 if "thread_id" not in st.session_state:
-    st.session_state["thread_id"] = generate_thread_id()
+    st.session_state["thread_id"] = f"{st.session_state['user_id']}::{generate_thread_id()}"
 
 if "chat_threads" not in st.session_state:
-    st.session_state["chat_threads"] = retrieve_all_threads()
+    # Fetch all threads, but ONLY keep the ones that belong to this user
+    all_db_threads = retrieve_all_threads()
+    my_threads = [t for t in all_db_threads if t.startswith(f"{st.session_state['user_id']}::")]
+    st.session_state["chat_threads"] = my_threads
 
 if "ingested_docs" not in st.session_state:
     st.session_state["ingested_docs"] = {}
@@ -76,10 +116,9 @@ thread_key = str(st.session_state["thread_id"])
 thread_docs = st.session_state["ingested_docs"].setdefault(thread_key, {})
 threads = st.session_state["chat_threads"][::-1]
 
-
-# ============================ Sidebar ============================
+# ============================ Sidebar (Chat UI) ============================
+st.sidebar.divider()
 st.sidebar.title("LangGraph PDF Chatbot")
-st.sidebar.markdown(f"**Thread ID:** `{thread_key}`")
 
 if st.sidebar.button("New Chat", use_container_width=True):
     reset_chat()
@@ -108,19 +147,17 @@ if uploaded_pdf:
             thread_docs[uploaded_pdf.name] = summary
             status_box.update(label="✅ PDF indexed", state="complete", expanded=False)
 
-st.sidebar.subheader("Past conversations")
+st.sidebar.subheader("Your Past Conversations")
 if not threads:
     st.sidebar.write("No past conversations yet.")
 else:
     for thread_id in threads:
-        # Fetch the dynamic title based on the first message
+        display_key = thread_id.split("::")[-1]
         title = get_thread_title(thread_id)
         
-        # Render the button. The `help` parameter shows the full UUID on hover.
         if st.sidebar.button(
             title, 
-            key=f"side-thread-{thread_id}", 
-            help=f"Thread ID: {thread_id}",
+            key=f"side-thread-{display_key}", 
             use_container_width=True
         ):
             st.session_state["pending_thread"] = thread_id
@@ -194,9 +231,7 @@ if user_input:
 
 st.divider()
 
-
 # ================= Past conversation loader =================
-# Handled after the chat turn to avoid interrupting streaming.
 if st.session_state["pending_thread"]:
     selected_thread = str(st.session_state["pending_thread"])
     st.session_state["pending_thread"] = None
