@@ -8,10 +8,11 @@ from typing import Annotated, Any, Dict, Optional, TypedDict
 import psycopg
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.tools import DuckDuckGoSearchRun  # <-- Fixed import
+from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig  # <-- Added for automatic thread_id
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -148,8 +149,12 @@ def get_stock_price(symbol: str) -> dict:
         return {"error": str(e)}
 
 @tool
-def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
+def rag_tool(query: str, config: RunnableConfig) -> dict:
     """Retrieve relevant information from the uploaded PDF for this chat thread."""
+    # Automatically pull the thread_id from the LangGraph configuration
+    # so the LLM doesn't have to guess or remember it.
+    thread_id = config.get("configurable", {}).get("thread_id")
+    
     retriever = _get_retriever(thread_id)
     if retriever is None:
         return {"error": "No document indexed for this chat. Upload a PDF first.", "query": query}
@@ -178,17 +183,14 @@ class ChatState(TypedDict):
 # 5. Nodes
 # -------------------
 def chat_node(state: ChatState, config=None):
-    thread_id = None
-    if config and isinstance(config, dict):
-        thread_id = config.get("configurable", {}).get("thread_id")
-
+    # Stronger prompt to force the LLM to use the rag_tool
     system_message = SystemMessage(
         content=(
-            "You are a helpful assistant. For questions about the uploaded PDF, call "
-            "the `rag_tool` and include the thread_id "
-            f"`{thread_id}`. You can also use the web search, stock price, and "
-            "calculator tools when helpful. If no document is available, ask the user "
-            "to upload a PDF."
+            "You are a helpful assistant. "
+            "CRITICAL INSTRUCTION: If the user asks ANY question about a document, resume, PDF, or file, "
+            "you MUST call the `rag_tool`. Do not say you don't see the PDF; just use the tool. "
+            "If the tool returns an error saying no document is indexed, THEN you can ask the user to upload a PDF. "
+            "You can also use the web search, stock price, and calculator tools when helpful."
         )
     )
 
