@@ -8,7 +8,7 @@ from typing import Annotated, Any, Dict, Optional, TypedDict
 import psycopg
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.tools import DuckDuckGoSearchRun
+from ddgs import DDGS
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.tools import tool

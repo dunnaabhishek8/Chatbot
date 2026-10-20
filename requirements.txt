@@ -10,5 +10,5 @@ psycopg[binary]
 faiss-cpu
 pypdf
 python-dotenv
-duckduckgo-search
+ddgs
 requests
