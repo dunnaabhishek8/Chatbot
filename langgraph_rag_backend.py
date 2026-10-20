@@ -8,7 +8,7 @@ from typing import Annotated, Any, Dict, Optional, TypedDict
 import psycopg
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
-from ddgs import DDGS
+from langchain_community.tools import DuckDuckGoSearchRun  # <-- Fixed import
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.tools import tool
@@ -34,7 +34,6 @@ llm = ChatGroq(
     max_retries=2,
 )
 
-# Using Gemini for embeddings (requires GOOGLE_API_KEY in .env)
 embeddings = GoogleGenerativeAIEmbeddings(
     model="gemini-embedding-001",
     google_api_key=os.getenv("GOOGLE_API_KEY")
@@ -206,10 +205,8 @@ DB_URI = os.getenv("SUPABASE_DB_URI")
 if not DB_URI:
     raise ValueError("SUPABASE_DB_URI environment variable is not set.")
 
-# Connect to Supabase Postgres (autocommit=True is required for LangGraph)
 conn = psycopg.connect(DB_URI, autocommit=True)
 checkpointer = PostgresSaver(conn)
-# Create the necessary tables in Supabase if they don't exist yet
 checkpointer.setup()
 
 graph = StateGraph(ChatState)
@@ -227,7 +224,6 @@ chatbot = graph.compile(checkpointer=checkpointer)
 # -------------------
 def retrieve_all_threads() -> list[str]:
     all_threads: set[str] = set()
-    # List checkpoints from the Postgres database
     for checkpoint in checkpointer.list(None):
         tid = checkpoint.config["configurable"]["thread_id"]
         if tid is not None:
