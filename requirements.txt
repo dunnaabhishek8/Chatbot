@@ -1,0 +1,14 @@
+streamlit
+langchain
+langchain-community
+langchain-google-genai
+langchain-groq
+langchain-text-splitters
+langgraph
+langgraph-checkpoint-postgres
+psycopg[binary]
+faiss-cpu
+pypdf
+python-dotenv
+duckduckgo-search
+requests
